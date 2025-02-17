@@ -1,0 +1,160 @@
+---
+title: "Optiver"
+format: pdf
+editor: visual
+---
+
+# Optiver Challenge
+
+Installing packages
+
+```{r}
+need <- c("httr", "jsonlite", "magrittr", "readr") # list packages needed
+have <- need %in% rownames(installed.packages()) # checks packages you have
+if(any(!have)) install.packages(need[!have]) # install missing packages
+invisible(lapply(need, library, character.only=T)) # load needed packages
+```
+
+Function to get data
+
+```{r}
+get_series_data <- function(series_id, api_key) {
+  # Initialize an empty data frame to store all the data for the current series
+  all_data <- data.frame()
+  
+  page <- 1  # Start at page 1
+  has_more_data <- TRUE
+  
+  while (has_more_data) {
+    # Define the query parameters
+    params <- list(
+      series_id = series_id,
+      api_key = api_key,
+      file_type = "json",
+      limit = 10000,  # Reasonable limit per request
+      page = page
+    )
+    
+    # Make the API request
+    response <- GET(url, query = params)
+    
+    # Print the HTTP status code for debugging
+    cat("Status code for series", series_id, ":", http_status(response)$status_code, "\n")
+    
+    # Check if the request was successful
+    if (http_status(response)$category == "Success") {
+      # Parse the JSON response
+      data <- content(response, "text") %>% fromJSON()
+      
+      # Extract the observations
+      observations <- data$observations
+      
+      # Append the new data to all_data
+      if (length(observations) > 0) {
+        all_data <- rbind(all_data, as.data.frame(observations))
+      }
+      
+      # Fix Pagination: Only continue if FRED API provides "next_offset"
+      has_more_data <- "next_offset" %in% names(data)
+      page <- page + 1
+    } else {
+      # Print the response content if the request failed for debugging
+      print(content(response, "text"))
+      stop("Failed to retrieve data from FRED API. Status code:", http_status(response)$status_code)
+    }
+  }
+  
+  return(all_data)
+}
+```
+
+Which datasets we want
+
+```{r}
+# Set up the API URL
+url <- "https://api.stlouisfed.org/fred/series/observations"
+
+# Define a dictionary mapping series IDs to names
+series_names <- list(
+  "APU0000708111" = "Average Price: Eggs, Grade A, Large (Cost per Dozen) in U.S. City Average",
+  "APU0000709112" = "Average Price: Milk, Fresh, Whole, Fortified (Cost per Gallon/3.8 Liters) in U.S. City Average"
+)
+
+# Define the list of series IDs you want to load
+series_ids <- names(series_names)
+
+# Your FRED API key
+secrets <- fromJSON("./secrets.json")
+api_key <- secrets$API_key
+```
+
+Create folders and directories
+
+```{r}
+# some setup: pathing and folder structure
+table_dir <- "./output/tables/"
+figure_dir <- "./output/figures/"
+data_folder <- "./data/raw/"
+dir.create(table_dir, recursive = TRUE)
+dir.create(figure_dir, recursive = TRUE)
+dir.create(data_folder, recursive = TRUE)
+dir.create("./data/processed")
+
+# Directory to save the CSV file
+setwd("~/Optiver-Challenge")
+```
+
+Loop and save data outputs
+
+```{r}
+for (series_id in series_ids) {
+  series_name <- series_names[[series_id]]  
+  cat("Retrieving data for series:", series_name, "(", series_id, ")\n")
+  
+  # Slow down API calls (to stay under 120 requests per minute)
+  Sys.sleep(1)  # Ensures max ~60 requests/min (adjust this if needed)
+
+  # Retry logic in case of rate limit (HTTP 429)
+  retry <- TRUE
+  attempts <- 0
+  max_attempts <- 5  # Limit retries to prevent infinite loops
+  
+  while (retry && attempts < max_attempts) {
+    attempts <- attempts + 1
+    
+    series_data <- tryCatch({
+      get_series_data(series_id, api_key)
+    }, error = function(e) {
+      cat("Error retrieving data for series:", series_id, ":", e$message, "\n")
+      NULL
+    })
+    
+    # If the request fails due to rate limits (429), wait and retry
+    if (is.null(series_data)) {
+      cat("API rate limit exceeded. Waiting for 30 seconds before retrying...\n")
+      Sys.sleep(30)  # Increase delay when hitting rate limit
+    } else {
+      retry <- FALSE  # If data is retrieved successfully, stop retrying
+    }
+  }
+  
+  # If data was retrieved successfully, save it
+  if (!is.null(series_data)) {
+    # Sanitize the series_name for valid file naming
+    safe_name <- gsub(" ", "_", series_name)  # Replace spaces with underscores
+    safe_name <- gsub("[^[:alnum:]_]", "", safe_name)  # Remove any non-alphanumeric characters (except underscores)
+    
+    # Check if file path is valid and create it
+    file_name <- file.path(data_folder, paste0(safe_name, "_data.csv"))
+    
+    # Save the data to a CSV file
+    write.csv(series_data, file_name, row.names = FALSE)
+    cat("Data for", series_name, "saved to", file_name, "\n")
+  } else {
+    cat("No data retrieved for series:", series_name, "(", series_id, ")\n")
+  }
+}
+
+cat("All data retrieval and saving complete.\n")
+
+```
