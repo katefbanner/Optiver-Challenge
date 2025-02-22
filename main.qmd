@@ -9,7 +9,7 @@ editor: visual
 Installing packages
 
 ```{r}
-need <- c("httr", "jsonlite", "magrittr", "readr") # list packages needed
+need <- c("httr", "jsonlite", "magrittr", "readr", "openxlsx") # list packages needed
 have <- need %in% rownames(installed.packages()) # checks packages you have
 if(any(!have)) install.packages(need[!have]) # install missing packages
 invisible(lapply(need, library, character.only=T)) # load needed packages
@@ -26,13 +26,14 @@ get_series_data <- function(series_id, api_key) {
   has_more_data <- TRUE
   
   while (has_more_data) {
-    # Define the query parameters
+    # Define the query parameters (adding observation_start for 2005)
     params <- list(
       series_id = series_id,
       api_key = api_key,
       file_type = "json",
       limit = 10000,  # Reasonable limit per request
-      page = page
+      page = page,
+      observation_start = "2005-01-01"  # <-- Only get data from Jan 2005 onwards
     )
     
     # Make the API request
@@ -54,7 +55,7 @@ get_series_data <- function(series_id, api_key) {
         all_data <- rbind(all_data, as.data.frame(observations))
       }
       
-      # Fix Pagination: Only continue if FRED API provides "next_offset"
+      # Pagination: Continue if FRED API provides "next_offset"
       has_more_data <- "next_offset" %in% names(data)
       page <- page + 1
     } else {
@@ -66,6 +67,7 @@ get_series_data <- function(series_id, api_key) {
   
   return(all_data)
 }
+
 ```
 
 Which datasets we want
@@ -77,7 +79,24 @@ url <- "https://api.stlouisfed.org/fred/series/observations"
 # Define a dictionary mapping series IDs to names
 series_names <- list(
   "APU0000708111" = "Average Price: Eggs, Grade A, Large (Cost per Dozen) in U.S. City Average",
-  "APU0000709112" = "Average Price: Milk, Fresh, Whole, Fortified (Cost per Gallon/3.8 Liters) in U.S. City Average"
+  "APU0000709112" = "Average Price: Milk, Fresh, Whole, Fortified (Cost per Gallon/3.8 Liters) in U.S. City Average",
+  "WPU01830131" = "Producer Price Index by Commodity: Farm Products: Soybeans",
+  "WPU02930102" = "Producer Price Index by Commodity: Processed Foods and Feeds: Chicken and Turkey Feed, Supplements,          Concentrates, and Premixes",
+  "WPS012202" = "Producer Price Index by Commodity: Farm Products: Corn",
+  "UNRATE" = "Unemployment Rate",
+  "UMCSENT" = "University of Michigan: Consumer Sentiment",
+  "PCE" = "Personal Consumption Expenditures",
+  "MRTSSM7225USN" = "Retail Sales: Restaurants and Other Eating Places",
+  "MRTSSM44X72USS" = "Retail Sales: Retail Trade and Food Services",
+  "GASREGW" = "US Regular All Formulations Gas Price",
+  "GASDESW" = "US Diesel Sales Price",
+  "FEDFUNDS" = "Federal Funds Effective Rate", 
+  "DSPIC96" = "Real Disposable Personal Income",
+  "CUSR0000SEHF" = "Consumer Price Index for All Urban Consumers: Energy Services in U.S. City Average",
+  "CPIUFDSL" = "Consumer Price Index for All Urban Consumers: Food in U.S. City Average",
+  "CPIAUCSL" = "Consumer Price Index for All Urban Consumers: All Items in U.S. City Average", 
+  "APU0000FF1101" = "Average Price: Chicken Breast, Boneless (Cost per Pound/453.6 Grams) in U.S. City Average",
+  "APU0000706111" = "Average Price: Chicken, Fresh, Whole (Cost per Pound/453.6 Grams) in U.S. City Average"
 )
 
 # Define the list of series IDs you want to load
@@ -147,8 +166,10 @@ for (series_id in series_ids) {
     # Check if file path is valid and create it
     file_name <- file.path(data_folder, paste0(safe_name, "_data.csv"))
     
-    # Save the data to a CSV file
-    write.csv(series_data, file_name, row.names = FALSE)
+    
+    # Save the data to an Excel file
+    file_name <- file.path(data_folder, paste0(safe_name, "_data.xlsx"))
+    write.xlsx(series_data, file_name, rowNames = FALSE)
     cat("Data for", series_name, "saved to", file_name, "\n")
   } else {
     cat("No data retrieved for series:", series_name, "(", series_id, ")\n")
