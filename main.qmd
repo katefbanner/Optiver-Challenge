@@ -9,7 +9,7 @@ editor: visual
 Installing packages
 
 ```{r}
-need <- c("httr", "jsonlite", "magrittr", "readr", "openxlsx") # list packages needed
+need <- c("httr", "jsonlite", "magrittr", "readr", "openxlsx", "dplyr", "lubridate", "stringr", "purrr") # list packages needed
 have <- need %in% rownames(installed.packages()) # checks packages you have
 if(any(!have)) install.packages(need[!have]) # install missing packages
 invisible(lapply(need, library, character.only=T)) # load needed packages
@@ -114,6 +114,7 @@ Create folders and directories
 table_dir <- "./output/tables/"
 figure_dir <- "./output/figures/"
 data_folder <- "./data/raw/"
+output_file <- "./data/processed/merged_dataset.xlsx"  # Output file
 dir.create(table_dir, recursive = TRUE)
 dir.create(figure_dir, recursive = TRUE)
 dir.create(data_folder, recursive = TRUE)
@@ -179,3 +180,73 @@ for (series_id in series_ids) {
 cat("All data retrieval and saving complete.\n")
 
 ```
+
+Imputing one missing month (average price of chicken fresh) 
+```{r}
+# Step 1: Read the Excel file
+df <- read_excel("~/Optiver-Challenge/data/raw/Average_Price_Chicken_Fresh_Whole_Cost_per_Pound4536_Grams_in_US_City_Average_data.xlsx")
+
+# Step 2: Convert "." to NA in the value column
+df$value[df$value == "."] <- NA
+
+# Step 3: Ensure the 'value' column is numeric
+df$value <- as.numeric(df$value)
+
+# Step 4: Impute the missing value with the average of the previous and next value
+na_index <- which(is.na(df$value))  # Find the index of the missing value (NA)
+
+if (length(na_index) == 1) {
+  prev_value <- df$value[na_index - 1]  # Previous value
+  next_value <- df$value[na_index + 1]  # Next value
+  
+  # Impute with the average of the previous and next value
+  if (!is.na(prev_value) & !is.na(next_value)) {
+    df$value[na_index] <- (prev_value + next_value) / 2
+  }
+}
+
+# Step 6: Save the modified dataframe as the same Excel file
+write.xlsx(df, "~/Optiver-Challenge/data/raw/Average_Price_Chicken_Fresh_Whole_Cost_per_Pound4536_Grams_in_US_City_Average_data.xlsx", overwrite = TRUE)
+
+# Optionally, print to check the result
+print("File saved successfully")
+```
+
+and merging the datasets 
+```{r}
+# List xlsx files
+xlsx_files <- list.files(path = "./data/raw", pattern = "^[^~].*\\.xlsx$", full.names = TRUE)
+
+# Function to read and process each dataset
+read_and_process <- function(file) {
+  # Read columns C and D (date and value)
+  df <- read_excel(file, col_names = FALSE) %>%
+    select(3, 4) %>%
+    rename(date = 1, value = 2) %>%
+    mutate(date = as.Date(date, format = "%Y-%m-%d"))
+
+  # Convert the data into monthly averages
+  monthly_df <- df %>%
+    mutate(year_month = floor_date(date, "month")) %>%
+    group_by(year_month) %>%
+    summarise(value = mean(value, na.rm = TRUE), .groups = "drop")
+  
+  return(monthly_df)
+}
+
+# Process each file into a monthly aggregated dataset
+data_list <- map(xlsx_files, read_and_process)
+
+# Merge all datasets by the year_month column
+merged_data <- reduce(data_list, full_join, by = "year_month") %>%
+  arrange(year_month)
+
+# View the merged data
+print(head(merged_data))
+
+# Save the merged dataset as an Excel file
+write.xlsx(merged_data, "./data/processed/merged_dataset.xlsx", rowNames = FALSE)
+cat("Merged dataset saved to ./data/processed/merged_dataset.xlsx\n")
+```
+
+
