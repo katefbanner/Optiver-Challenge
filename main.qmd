@@ -9,7 +9,7 @@ editor: visual
 Installing packages
 
 ```{r}
-need <- c("httr", "jsonlite", "magrittr", "readr", "openxlsx", "dplyr", "lubridate", "stringr", "purrr") # list packages needed
+need <- c("httr", "jsonlite", "magrittr", "readr", "openxlsx", "dplyr", "lubridate", "stringr", "purrr", "readxl") # list packages needed
 have <- need %in% rownames(installed.packages()) # checks packages you have
 if(any(!have)) install.packages(need[!have]) # install missing packages
 invisible(lapply(need, library, character.only=T)) # load needed packages
@@ -33,7 +33,7 @@ get_series_data <- function(series_id, api_key) {
       file_type = "json",
       limit = 10000,  # Reasonable limit per request
       page = page,
-      observation_start = "2005-01-01"  # <-- Only get data from Jan 2005 onwards
+      observation_start = "2006-01-01"  # <-- Only get data from Jan 2005 onwards
     )
     
     # Make the API request
@@ -208,28 +208,45 @@ if (length(na_index) == 1) {
 # Step 6: Save the modified dataframe as the same Excel file
 write.xlsx(df, "~/Optiver-Challenge/data/raw/Average_Price_Chicken_Fresh_Whole_Cost_per_Pound4536_Grams_in_US_City_Average_data.xlsx", overwrite = TRUE)
 
-# Optionally, print to check the result
+# print to check the result
 print("File saved successfully")
 ```
 
-and merging the datasets 
+merging the datasets 
 ```{r}
 # List xlsx files
 xlsx_files <- list.files(path = "./data/raw", pattern = "^[^~].*\\.xlsx$", full.names = TRUE)
 
 # Function to read and process each dataset
 read_and_process <- function(file) {
-  # Read columns C and D (date and value)
+  # Extract the base column name from the file (clean up name)
+  col_name <- basename(file) %>%
+    tools::file_path_sans_ext() %>%
+    gsub("_data", "", .) %>%
+    gsub("[^A-Za-z0-9]", "_", .)
+  
+  # Read the Excel file, selecting columns C and D (date and value)
   df <- read_excel(file, col_names = FALSE) %>%
     select(3, 4) %>%
     rename(date = 1, value = 2) %>%
     mutate(date = as.Date(date, format = "%Y-%m-%d"))
-
+  
+  # Clean the 'value' column: Remove any non-numeric characters except for dots
+  df <- df %>%
+    mutate(value = gsub("[^0-9.]", "", value)) %>%  # Remove any non-numeric characters except dots
+  
+    # Handle potential empty strings or non-numeric entries
+    mutate(value = ifelse(value == "", NA, value)) %>%
+    mutate(value = as.numeric(value))  # Convert to numeric (empty strings or non-numeric become NA)
+  
+  # If there are still NA values in 'value', you can add some imputation or check them here
+  # For now, just keep the NA if it's there
+  
   # Convert the data into monthly averages
   monthly_df <- df %>%
     mutate(year_month = floor_date(date, "month")) %>%
     group_by(year_month) %>%
-    summarise(value = mean(value, na.rm = TRUE), .groups = "drop")
+    summarise(!!col_name := mean(value, na.rm = TRUE), .groups = "drop")
   
   return(monthly_df)
 }
@@ -241,12 +258,19 @@ data_list <- map(xlsx_files, read_and_process)
 merged_data <- reduce(data_list, full_join, by = "year_month") %>%
   arrange(year_month)
 
+# Rename 'year_month' column to 'date'
+merged_data <- merged_data %>%
+  rename(date = year_month)
+
 # View the merged data
 print(head(merged_data))
 
 # Save the merged dataset as an Excel file
 write.xlsx(merged_data, "./data/processed/merged_dataset.xlsx", rowNames = FALSE)
 cat("Merged dataset saved to ./data/processed/merged_dataset.xlsx\n")
+
+
+
 ```
 
 
