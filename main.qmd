@@ -9,7 +9,7 @@ editor: visual
 Installing packages
 
 ```{r}
-need <- c("httr", "jsonlite", "magrittr", "readr", "openxlsx", "dplyr", "lubridate", "stringr", "purrr", "readxl") # list packages needed
+need <- c("httr", "jsonlite", "magrittr", "readr", "openxlsx", "dplyr", "lubridate", "stringr", "purrr", "readxl", "tidyverse") # list packages needed
 have <- need %in% rownames(installed.packages()) # checks packages you have
 if(any(!have)) install.packages(need[!have]) # install missing packages
 invisible(lapply(need, library, character.only=T)) # load needed packages
@@ -214,63 +214,106 @@ print("File saved successfully")
 
 merging the datasets 
 ```{r}
-# List xlsx files
-xlsx_files <- list.files(path = "./data/raw", pattern = "^[^~].*\\.xlsx$", full.names = TRUE)
-
-# Function to read and process each dataset
+# Function to read, process, and aggregate the datasets
 read_and_process <- function(file) {
   # Extract the base column name from the file (clean up name)
   col_name <- basename(file) %>%
     tools::file_path_sans_ext() %>%
     gsub("_data", "", .) %>%
     gsub("[^A-Za-z0-9]", "_", .)
-  
+
   # Read the Excel file, selecting columns C and D (date and value)
   df <- read_excel(file, col_names = FALSE) %>%
     select(3, 4) %>%
-    rename(date = 1, value = 2) %>%
-    mutate(date = as.Date(date, format = "%Y-%m-%d"))
-  
-  # Clean the 'value' column: Remove any non-numeric characters except for dots
+    rename(date = 1, value = 2)
+
+  # Ensure 'date' is in Date format
+  df <- df %>% mutate(date = as.Date(date, format = "%Y-%m-%d"))
+
+  # Handle missing values represented by "." or blank ""
   df <- df %>%
-    mutate(value = gsub("[^0-9.]", "", value)) %>%  # Remove any non-numeric characters except dots
-  
-    # Handle potential empty strings or non-numeric entries
-    mutate(value = ifelse(value == "", NA, value)) %>%
-    mutate(value = as.numeric(value))  # Convert to numeric (empty strings or non-numeric become NA)
-  
-  # If there are still NA values in 'value', you can add some imputation or check them here
-  # For now, just keep the NA if it's there
-  
-  # Convert the data into monthly averages
+    mutate(value = ifelse(value == "." | value == "", NA, value)) %>%
+    mutate(value = as.numeric(value))
+
+  # Convert to monthly averages
   monthly_df <- df %>%
-    mutate(year_month = floor_date(date, "month")) %>%
-    group_by(year_month) %>%
+    mutate(date = floor_date(date, "month")) %>%
+    group_by(date) %>%
     summarise(!!col_name := mean(value, na.rm = TRUE), .groups = "drop")
-  
+
   return(monthly_df)
 }
+
+# List xlsx files
+xlsx_files <- list.files(path = "./data/raw", pattern = "^[^~].*\\.xlsx$", full.names = TRUE)
 
 # Process each file into a monthly aggregated dataset
 data_list <- map(xlsx_files, read_and_process)
 
-# Merge all datasets by the year_month column
-merged_data <- reduce(data_list, full_join, by = "year_month") %>%
-  arrange(year_month)
+# Merge all datasets by the date column
+merged_data <- reduce(data_list, full_join, by = "date") %>%
+  arrange(date)
 
-# Rename 'year_month' column to 'date'
-merged_data <- merged_data %>%
-  rename(date = year_month)
+# Step 1: Save the merged dataset (without imputation) to a file
+write.xlsx(merged_data, "./data/processed/merged_dataset_without_imputation.xlsx", rowNames = FALSE)
+cat("Merged dataset saved to ./data/processed/merged_dataset_without_imputation.xlsx\n")
 
-# View the merged data
-print(head(merged_data))
+```
 
-# Save the merged dataset as an Excel file
-write.xlsx(merged_data, "./data/processed/merged_dataset.xlsx", rowNames = FALSE)
-cat("Merged dataset saved to ./data/processed/merged_dataset.xlsx\n")
+Impute January values
+```{r}
 
+# Read the dataset with explicit date handling
+merged_data_reopened <- read.xlsx("./data/processed/merged_dataset_without_imputation.xlsx")
 
+# Convert Excel serial date to proper Date format
+merged_data_reopened$date <- as.Date(as.numeric(merged_data_reopened$date), origin = "1899-12-30")
 
+# Create a new row for the target date
+target_date <- as.Date("2025-01-01")  # Changed to January 1st
+new_row <- data.frame(date = target_date)
+for(col in colnames(merged_data_reopened)[-1]) {
+  new_row[[col]] <- NA
+}
+
+# Append the new row
+merged_data_reopened <- rbind(merged_data_reopened, new_row)
+merged_data_reopened <- merged_data_reopened[order(merged_data_reopened$date), ]
+
+# Get the row index for 2025-01-01
+target_row <- which(merged_data_reopened$date == target_date)
+
+# Function to perform linear extrapolation
+extrapolate_value <- function(data, column) {
+  last_values <- tail(na.omit(data[, column]), 2)
+  if (length(last_values) >= 2) {
+    return(last_values[2] + (last_values[2] - last_values[1]))
+  }
+  return(NA)
+}
+
+# Create a data frame to store the results
+imputed_values <- data.frame(Column = character(), Value = numeric(), stringsAsFactors = FALSE)
+
+# Process each column except date and store results
+for (col in colnames(merged_data_reopened)[-1]) {
+  value <- extrapolate_value(merged_data_reopened, col)
+  merged_data_reopened[target_row, col] <- value
+  imputed_values <- rbind(imputed_values, data.frame(Column = col, Value = value))
+}
+
+# Display imputed values in a readable format
+print("\nImputed values for 2025-01-01:")
+for (i in 1:nrow(imputed_values)) {
+  cat(sprintf("\n%s: %.3f", imputed_values$Column[i], imputed_values$Value[i]))
+}
+
+# Save the updated dataset
+write.xlsx(merged_data_reopened, "./data/processed/merged_dataset_imputed.xlsx", rowNames = FALSE)
+
+# Verify the save was successful
+cat("\n\nDataset has been saved to: ./data/processed/merged_dataset_imputed.xlsx")
+ 
 ```
 
 
