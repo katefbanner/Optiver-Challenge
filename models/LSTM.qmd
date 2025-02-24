@@ -1,0 +1,26 @@
+---
+title: "lstm"
+format: html
+editor: visual
+---
+
+## LSTM
+
+
+install packages
+```{r}
+# Install Keras and TensorFlow
+install.packages("keras")
+library(keras)
+install_keras()  # Ensure TensorFlow is installed
+
+```
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).

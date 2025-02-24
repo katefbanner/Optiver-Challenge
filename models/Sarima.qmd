@@ -1,0 +1,100 @@
+---
+title: "sarima"
+format: html
+editor: visual
+---
+
+## Sarima Model 
+
+load packages
+
+```{r}
+
+# Load libraries
+library(forecast)
+library(tseries)
+library(ggplot2)
+library(readxl)
+
+```
+
+functions
+
+```{r}
+# Function to forecast exogenous variables
+forecast_exog <- function(ts_data) {
+  # Fit ARIMA model
+  fit <- auto.arima(ts_data)
+  
+  # Forecast next value (February 2025)
+  forecast <- forecast(fit, h = 1)
+  
+  # Return the forecasted value
+  return(forecast$mean[1])
+}
+
+# Function to prepare exogenous variables
+prepare_exog <- function(df, exog_columns) {
+  # Initialize a vector to store forecasted values
+  exog_feb2025 <- numeric(length(exog_columns))
+  
+  # Loop through each exogenous variable
+  for (i in seq_along(exog_columns)) {
+    # Extract the column and convert to time series
+    ts_data <- ts(df[[exog_columns[i]]], start = c(2006, 1), frequency = 12)
+    
+    # Forecast February 2025 value
+    exog_feb2025[i] <- forecast_exog(ts_data)
+  }
+  
+  # Return as a matrix (required for SARIMAX)
+  return(matrix(exog_feb2025, nrow = 1))
+}
+
+# Function to fit SARIMAX model and predict egg prices
+predict_egg_price <- function(df, exog_columns) {
+  # Prepare target variable (egg prices)
+  ts_eggs <- ts(df$Average_Price_Eggs_Grade_A_Large_Cost_per_Dozen_in_US_City_Average,
+                start = c(2006, 1), frequency = 12)
+  
+  # Prepare exogenous variables
+  exog_vars <- as.matrix(df[, exog_columns])
+  
+  # Fit SARIMAX model
+  fit <- auto.arima(ts_eggs, seasonal = TRUE, xreg = exog_vars)
+  
+  # Forecast exogenous variables for February 2025
+  exog_feb2025 <- prepare_exog(df, exog_columns)
+  
+  # Predict egg prices for February 2025
+  forecast_eggs <- forecast(fit, h = 1, xreg = exog_feb2025)
+  
+  # Return the forecasted value
+  return(forecast_eggs$mean[1])
+}
+```
+
+
+apply functions
+```{r}
+# Load data
+df <- read_excel('~/Optiver-Challenge/excel-editing/dataset.xlsx')
+
+# Prepare data
+df <- df[, c("date", "Average_Price_Eggs_Grade_A_Large_Cost_per_Dozen_in_US_City_Average", 
+             "Consumer_Price_Index_for_All_Urban_Consumers_Food_in_US_City_Average", 
+             "Unemployment_Rate", "US_Regular_All_Formulations_Gas_Price")]
+df$date <- as.Date(df$date)
+
+
+# Define exogenous variables
+exog_columns <- c("Consumer_Price_Index_for_All_Urban_Consumers_Food_in_US_City_Average", 
+                  "Unemployment_Rate", "US_Regular_All_Formulations_Gas_Price")
+
+# Predict egg prices for February 2025
+egg_price_feb2025 <- predict_egg_price(df, exog_columns)
+print(paste("Predicted egg price for February 2025:", egg_price_feb2025))
+
+```
+
+
