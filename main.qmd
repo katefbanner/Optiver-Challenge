@@ -269,18 +269,8 @@ merged_data_reopened <- read.xlsx("./data/processed/merged_dataset_without_imput
 # Convert Excel serial date to proper Date format
 merged_data_reopened$date <- as.Date(as.numeric(merged_data_reopened$date), origin = "1899-12-30")
 
-# Create a new row for the target date
-target_date <- as.Date("2025-01-01")  # Changed to January 1st
-new_row <- data.frame(date = target_date)
-for(col in colnames(merged_data_reopened)[-1]) {
-  new_row[[col]] <- NA
-}
-
-# Append the new row
-merged_data_reopened <- rbind(merged_data_reopened, new_row)
-merged_data_reopened <- merged_data_reopened[order(merged_data_reopened$date), ]
-
 # Get the row index for 2025-01-01
+target_date <- as.Date("2025-01-01")
 target_row <- which(merged_data_reopened$date == target_date)
 
 # Function to perform linear extrapolation
@@ -295,17 +285,23 @@ extrapolate_value <- function(data, column) {
 # Create a data frame to store the results
 imputed_values <- data.frame(Column = character(), Value = numeric(), stringsAsFactors = FALSE)
 
-# Process each column except date and store results
+# Process each column except date, but only if the value is missing
 for (col in colnames(merged_data_reopened)[-1]) {
-  value <- extrapolate_value(merged_data_reopened, col)
-  merged_data_reopened[target_row, col] <- value
-  imputed_values <- rbind(imputed_values, data.frame(Column = col, Value = value))
+  if (is.na(merged_data_reopened[target_row, col])) {
+    value <- extrapolate_value(merged_data_reopened, col)
+    merged_data_reopened[target_row, col] <- value
+    imputed_values <- rbind(imputed_values, data.frame(Column = col, Value = value))
+  }
 }
 
-# Display imputed values in a readable format
-print("\nImputed values for 2025-01-01:")
-for (i in 1:nrow(imputed_values)) {
-  cat(sprintf("\n%s: %.3f", imputed_values$Column[i], imputed_values$Value[i]))
+# Display only the imputed values in a readable format
+if (nrow(imputed_values) > 0) {
+  print("\nImputed values for 2025-01-01 (only for missing values):")
+  for (i in 1:nrow(imputed_values)) {
+    cat(sprintf("\n%s: %.3f", imputed_values$Column[i], imputed_values$Value[i]))
+  }
+} else {
+  cat("\nNo values needed imputation for 2025-01-01")
 }
 
 # Save the updated dataset
@@ -313,6 +309,10 @@ write.xlsx(merged_data_reopened, "./data/processed/merged_dataset_imputed.xlsx",
 
 # Verify the save was successful
 cat("\n\nDataset has been saved to: ./data/processed/merged_dataset_imputed.xlsx")
+
+# Display the full row for verification
+cat("\n\nFull row for 2025-01-01 (including both original and imputed values):\n")
+print(merged_data_reopened[target_row, ])
  
 ```
 
